@@ -6,12 +6,13 @@
 //  Copyright © 2016年 tashaxing. All rights reserved.
 //
 
+#import <AudioToolbox/AudioToolbox.h>
 #import "GestureLockView.h"
 
 const int kRow = 3;          // 每行个数
 const int kCol = 3;          // 每列个数
 
-const float kBoardTop = 150; // 手势键盘顶部坐标
+const float kBoardTop = 200; // 手势键盘顶部坐标
 const float kDotSize = 50;   // 点的尺寸
 
 
@@ -51,27 +52,34 @@ const float kDotSize = 50;   // 点的尺寸
         CGSize screenSize = [UIScreen mainScreen].bounds.size;
         self = [[GestureLockView alloc] initWithFrame:CGRectMake(0, screenSize.height, screenSize.width, screenSize.height)];
         self.backgroundColor = [UIColor whiteColor];
+        
         // 初始化数据
         lineArray = [NSMutableArray array];
         gestureDotIndexArray = [NSMutableArray array];
         isStartDotSelected = NO;
+        
+        // UI搭建
+        [self createUI];
     }
     return self;
 }
 
-+ (NSString *)getPassword
++ (NSString *)getGesturePassword
 {
     // 从文件中读
-    return nil;
+    NSString *passwordStr = [[NSUserDefaults standardUserDefaults] objectForKey:kPasswordKey];
+    return passwordStr;
 }
 
 + (void)deletePassword
 {
-    
+    // 删除对应的key
+    [[NSUserDefaults standardUserDefaults] removeObjectForKey:kPasswordKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
 }
 
-#pragma mark - 搭建UI
-- (void)layoutSubviews
+#pragma mark - 搭建初始UI
+- (void)createUI
 {
     // 提示语
     tipLabel = [[UILabel alloc] initWithFrame:CGRectMake(self.frame.size.width / 2 - 50, 60, 100, 30)];
@@ -103,6 +111,19 @@ const float kDotSize = 50;   // 点的尺寸
             dotView.layer.cornerRadius = kDotSize / 2; // 切成圆形
             [self addSubview:dotView];
         }
+    }
+}
+
+- (void)resetGesture
+{
+    isStartDotSelected = NO;
+    tempLine = nil;
+    [lineArray removeAllObjects];
+    [gestureDotIndexArray removeAllObjects];
+    for (int i = 0; i < kRow * kCol; i++)
+    {
+        UIView *dotView = [self viewWithTag:i + 1000];
+        dotView.backgroundColor = [UIColor lightGrayColor];
     }
 }
 
@@ -161,38 +182,68 @@ const float kDotSize = 50;   // 点的尺寸
         [tempLine moveToPoint:startPoint];
         [tempLine addLineToPoint:endPoint];
         
-        // 判断终点是否在dot里面
+        // 判断终点是否在dot里面,并且这个点没有划过
         for (int i = 0; i < kRow * kCol; i++)
         {
             UIView *dotView = [self viewWithTag:i + 1000];
-            if (CGRectContainsPoint(dotView.frame, startPoint))
+            
+            // 必须两个条件一起判保证点不会重入
+            if (CGRectContainsPoint(dotView.frame, endPoint) && dotView.userInteractionEnabled)
             {
                 // 如果在里面就标记
-                dotView.backgroundColor = [UIColor greenColor];
+                dotView.backgroundColor = [UIColor colorWithRed:(arc4random() % 256) / 256.0f
+                                                          green:(arc4random() % 256) / 256.0f
+                                                           blue:(arc4random() % 256) / 256.0f
+                                                          alpha: 1];
                 dotView.userInteractionEnabled = NO; // 可以用其他的标志字，这里就简单用这个属性好了
                 
                 // dot添加到轨迹
                 [gestureDotIndexArray addObject:[NSNumber numberWithInt:i]];
                 
                 // 重新规划路径
-                [tempLine addLineToPoint:dotView.center];
+                
+                UIBezierPath *settledLine = [[UIBezierPath alloc] init];
+                [settledLine moveToPoint:startPoint];
+                [settledLine addLineToPoint:dotView.center];
                 
                 // 存储路径
-                [lineArray addObject:tempLine];
+                [lineArray addObject:settledLine];
+                
+                // 此处判断一下线路是否相交
+                
                 
                 // 修改起始点
                 startPoint = dotView.center;
             }
         }
-        
-        // 重绘
-        [self setNeedsLayout];
     }
-    
+    // 重绘
+    [self setNeedsDisplay];
 }
 
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event
 {
+    
+    // 得到密码,并存到文件（或者用全局变量什么的也行）
+    NSMutableString *passwordStr = [[NSMutableString alloc] init];
+    for (NSNumber *indexNumber in gestureDotIndexArray)
+    {
+        [passwordStr appendString:[NSString stringWithFormat:@"%d", indexNumber.intValue]];
+    }
+    
+    [[NSUserDefaults standardUserDefaults] setObject:passwordStr forKey:kPasswordKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+    
+    if (self.passwordSetBlock)
+    {
+        self.passwordSetBlock(passwordStr);
+    }
+    
+    // 最后清除存储的密码轨迹
+    [self resetGesture];
+    
+    // 重绘
+    [self setNeedsDisplay];
     
 }
 
@@ -200,17 +251,39 @@ const float kDotSize = 50;   // 点的尺寸
 - (void)drawRect:(CGRect)rect
 {
     // 绘制临时路径
+    
     tempLine.lineWidth = 5;
-    [[UIColor yellowColor] set];
+    tempLine.lineJoinStyle = kCGLineJoinRound;
+    [[UIColor redColor] set];
     [tempLine stroke];
     
     // 绘制轨迹
     for (UIBezierPath *path in lineArray)
     {
         path.lineWidth = 5;
-        [[UIColor redColor] set];
+        path.lineJoinStyle = kCGLineJoinRound;
+        [[UIColor blueColor] set];
         [path stroke];
     }
+}
+
+#pragma mark - 抖动动画
+- (void)shakeAnimationForView:(UIView *)view
+{
+    CALayer *viewLayer = view.layer;
+    CGPoint position = viewLayer.position;
+    CGPoint left = CGPointMake(position.x - 10, position.y);
+    CGPoint right = CGPointMake(position.x + 10, position.y);
+    
+    CABasicAnimation *animation = [CABasicAnimation animationWithKeyPath:@"position"];
+    [animation setTimingFunction:[CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut]];
+    [animation setFromValue:[NSValue valueWithCGPoint:left]];
+    [animation setToValue:[NSValue valueWithCGPoint:right]];
+    [animation setAutoreverses:YES]; // 平滑结束
+    [animation setDuration:0.08];
+    [animation setRepeatCount:3];
+    
+    [viewLayer addAnimation:animation forKey:nil];
 }
 
 #pragma mark - show和hide

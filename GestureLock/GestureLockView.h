@@ -8,6 +8,10 @@
 
 #import <UIKit/UIKit.h>
 
+#define kPasswordKey @"passwordStr"
+
+typedef void (^PasswordSetBlock)(NSString *);
+
 @interface GestureLockView : UIView
 
 // 单例
@@ -16,8 +20,11 @@
 - (void)showInView:(UIView *)parentView;
 // 消失
 - (void)hide;
+
+@property (nonatomic, strong) PasswordSetBlock passwordSetBlock; // 设置密码成功回调
+
 // 获取密码
-+ (NSString *)getPassword;
++ (NSString *)getGesturePassword;
 // 删除密码
 + (void)deletePassword;
 

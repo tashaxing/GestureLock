@@ -21,7 +21,10 @@
     [super viewDidLoad];
     // Do any additional setup after loading the view, typically from a nib.
     
-    
+    // 设置手势解锁的回调
+    [GestureLockView sharedLockView].passwordSetBlock = ^(NSString *password){
+        NSLog(@"%@", password);
+    };
 }
 
 // 创建手势
@@ -40,6 +43,7 @@
 // 删除手势
 - (IBAction)deleteBtn:(id)sender
 {
+    [GestureLockView deletePassword];
 }
 
 
