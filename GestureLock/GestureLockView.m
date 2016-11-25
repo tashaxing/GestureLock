@@ -15,17 +15,20 @@ const int kCol = 3;          // 每列个数
 const float kBoardTop = 200; // 手势键盘顶部坐标
 const float kDotSize = 50;   // 点的尺寸
 
+const int kPwdCount = 2; // 密码需要设置的次数
+
+//#define check_intersect // 是否检查相交测试开关
 
 @interface GestureLockView ()
 {
     NSString *password; // 维持密码
+    int pwdSetCount; // 密码设置次数
     NSMutableArray<UIBezierPath *> *lineArray; // 连线数组
     UIBezierPath *tempLine; // 临时连线
     NSMutableArray *gestureDotIndexArray; // 存储手势轨迹的关联点索引
     BOOL isStartDotSelected; // 是否有第一个点被选中
     
     CGPoint startPoint, endPoint; // 存储路径起始点和终止点
-    
     
     UILabel *tipLabel; // 提示语
 }
@@ -58,6 +61,7 @@ const float kDotSize = 50;   // 点的尺寸
         gestureDotIndexArray = [NSMutableArray array];
         isStartDotSelected = NO;
         
+        
         // UI搭建
         [self createUI];
     }
@@ -82,7 +86,7 @@ const float kDotSize = 50;   // 点的尺寸
 - (void)createUI
 {
     // 提示语
-    tipLabel = [[UILabel alloc] initWithFrame:CGRectMake(self.frame.size.width / 2 - 50, 60, 100, 30)];
+    tipLabel = [[UILabel alloc] initWithFrame:CGRectMake(self.frame.size.width / 2 - 100, 60, 200, 30)];
     tipLabel.text = @"请输入手势";
     tipLabel.textAlignment = NSTextAlignmentCenter;
     tipLabel.textColor = [UIColor redColor];
@@ -114,6 +118,7 @@ const float kDotSize = 50;   // 点的尺寸
     }
 }
 
+#pragma mark - 重置手势密码
 - (void)resetGesture
 {
     isStartDotSelected = NO;
@@ -125,6 +130,28 @@ const float kDotSize = 50;   // 点的尺寸
         UIView *dotView = [self viewWithTag:i + 1000];
         dotView.backgroundColor = [UIColor lightGrayColor];
     }
+}
+
+#pragma mark - 线段相交测试(p1,p2是线段1的端点，p3,p4是线段2的端点)
+bool checkLineIntersection(CGPoint p1, CGPoint p2, CGPoint p3, CGPoint p4)
+{
+    CGFloat denominator = (p4.y - p3.y) * (p2.x - p1.x) - (p4.x - p3.x) * (p2.y - p1.y);
+    
+    // In this case the lines are parallel so we assume they don't intersect~
+    if (denominator <= (1e-6) && denominator >= -(1e-6))
+    {
+        return true;
+    }
+    
+    // amazing~
+    CGFloat ua = ((p4.x - p3.x) * (p1.y - p3.y) - (p4.y - p3.y) * (p1.x - p3.x)) / denominator;
+    CGFloat ub = ((p2.x - p1.x) * (p1.y - p3.y) - (p2.y - p1.y) * (p1.x - p3.x)) / denominator;
+    
+    if (ua >= 0.0f && ua <= 1.0f && ub >= 0.0f && ub <= 1.0f)
+    {
+        return true;
+    }
+    return false;
 }
 
 #pragma mark - 触摸事件
@@ -169,6 +196,8 @@ const float kDotSize = 50;   // 点的尺寸
     
 }
 
+
+
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event
 {
     // 终止点
@@ -181,6 +210,38 @@ const float kDotSize = 50;   // 点的尺寸
         tempLine = [UIBezierPath bezierPath];
         [tempLine moveToPoint:startPoint];
         [tempLine addLineToPoint:endPoint];
+        
+#ifdef check_intersect
+        // 判断与之前的线段是否相交,不算最近的一个有接点的线段(目前体验不够好)
+        for (int i = 0; lineArray.count > 0 && i < lineArray.count - 1; i++)
+        {
+            UIBezierPath *path = lineArray[i];
+            
+            // 得到线段端点数组
+            NSArray *tempLinePoints = [self getPointsFromPath:tempLine];
+            NSArray *pathPoints = [self getPointsFromPath:path];
+            
+            // array里面都是元数据，value转成point,因为array里面只能存value
+            NSValue *value1 = tempLinePoints.firstObject;
+            CGPoint p1 = [value1 CGPointValue];
+            
+            NSValue *value2 = tempLinePoints.lastObject;
+            CGPoint p2 = [value2 CGPointValue];
+            
+            NSValue *value3 = pathPoints.firstObject;
+            CGPoint p3 = [value3 CGPointValue];
+            
+            NSValue *value4 = pathPoints.lastObject;
+            CGPoint p4 = [value4 CGPointValue];
+            
+            // 相交测试
+            if (checkLineIntersection(p1, p2, p3, p4))
+            {
+                [self shakeAnimationForView:tipLabel];
+                [self resetGesture];
+            }
+        }
+#endif
         
         // 判断终点是否在dot里面,并且这个点没有划过
         for (int i = 0; i < kRow * kCol; i++)
@@ -223,21 +284,8 @@ const float kDotSize = 50;   // 点的尺寸
 
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event
 {
-    
-    // 得到密码,并存到文件（或者用全局变量什么的也行）
-    NSMutableString *passwordStr = [[NSMutableString alloc] init];
-    for (NSNumber *indexNumber in gestureDotIndexArray)
-    {
-        [passwordStr appendString:[NSString stringWithFormat:@"%d", indexNumber.intValue]];
-    }
-    
-    [[NSUserDefaults standardUserDefaults] setObject:passwordStr forKey:kPasswordKey];
-    [[NSUserDefaults standardUserDefaults] synchronize];
-    
-    if (self.passwordSetBlock)
-    {
-        self.passwordSetBlock(passwordStr);
-    }
+    // 处理密码
+    [self processPassword];
     
     // 最后清除存储的密码轨迹
     [self resetGesture];
@@ -245,6 +293,135 @@ const float kDotSize = 50;   // 点的尺寸
     // 重绘
     [self setNeedsDisplay];
     
+}
+
+#pragma mark - 处理手势得到的密码
+- (void)processPassword
+{
+    // 得到密码
+    NSMutableString *passwordStr = [[NSMutableString alloc] init];
+    for (NSNumber *indexNumber in gestureDotIndexArray)
+    {
+        [passwordStr appendString:[NSString stringWithFormat:@"%d", indexNumber.intValue]];
+    }
+    
+    switch (_gestureState)
+    {
+        case CREATE_STATE:
+        {
+            pwdSetCount++;
+            
+            if (pwdSetCount == 1)
+            {
+                // 密码存文件（或者全局变量）
+                [[NSUserDefaults standardUserDefaults] setObject:passwordStr forKey:kPasswordKey];
+                [[NSUserDefaults standardUserDefaults] synchronize];
+                
+                tipLabel.text = @"请再输一次";
+                [self shakeAnimationForView:tipLabel];
+            }
+            else if (pwdSetCount == kPwdCount)
+            {
+                // 检验跟第一次是否一样
+                NSString *originalPwd = [[NSUserDefaults standardUserDefaults] objectForKey:kPasswordKey];
+                if ([passwordStr isEqualToString:originalPwd])
+                {
+                    if (self.passwordSetBlock)
+                    {
+                        self.passwordSetBlock([NSString stringWithFormat:@"password created: %@", passwordStr]);
+                    }
+                    [self hide];
+                }
+                else
+                {
+                    tipLabel.text = @"密码校验与第一次不同，重新输入";
+                    [self shakeAnimationForView:tipLabel];
+                    pwdSetCount--; // 减回去
+                }
+            }
+            
+            
+            
+        }
+            break;
+            
+        case VERIFY_STATE:
+        {
+            // 校验密码
+            NSString *originalPwd = [[NSUserDefaults standardUserDefaults] objectForKey:kPasswordKey];
+            if ([passwordStr isEqualToString:originalPwd])
+            {
+                if (self.passwordSetBlock)
+                {
+                    self.passwordSetBlock(@"password verify success!");
+                }
+                [self hide];
+            }
+            else
+            {
+                if (self.passwordSetBlock)
+                {
+                    self.passwordSetBlock(@"password verify failed!");
+                }
+                
+                tipLabel.text = @"密码校验失败，重新输入";
+                [self shakeAnimationForView:tipLabel];
+            }
+            
+        }
+            break;
+            
+        default:
+            break;
+    }
+    
+    
+}
+
+
+
+#pragma mark - 从贝塞尔曲线上得到点列表
+// http://stackoverflow.com/questions/3051760/how-to-get-a-list-of-points-from-a-uibezierpath
+- (NSMutableArray *)getPointsFromPath:(UIBezierPath *)path
+{
+    CGPathRef pathCGPath = path.CGPath;
+    NSMutableArray *bezierPoints = [NSMutableArray array];
+    CGPathApply(pathCGPath, (__bridge void * _Nullable)(bezierPoints), MyCGPathApplierFunc);
+    
+    return bezierPoints.copy;
+}
+
+void MyCGPathApplierFunc(void *arrayInfo, const CGPathElement *element)
+{
+    NSMutableArray *bezierPoints = (__bridge NSMutableArray *)arrayInfo;
+    
+    CGPoint *points = element->points;
+    CGPathElementType type = element->type;
+    
+    switch(type)
+    {
+        case kCGPathElementMoveToPoint: // contains 1 point
+            [bezierPoints addObject:[NSValue valueWithCGPoint:points[0]]];
+            break;
+            
+        case kCGPathElementAddLineToPoint: // contains 1 point
+            [bezierPoints addObject:[NSValue valueWithCGPoint:points[0]]];
+            break;
+            
+        case kCGPathElementAddQuadCurveToPoint: // contains 2 points
+            [bezierPoints addObject:[NSValue valueWithCGPoint:points[0]]];
+            [bezierPoints addObject:[NSValue valueWithCGPoint:points[1]]];
+            break;
+            
+        case kCGPathElementAddCurveToPoint: // contains 3 points
+            [bezierPoints addObject:[NSValue valueWithCGPoint:points[0]]];
+            [bezierPoints addObject:[NSValue valueWithCGPoint:points[1]]];
+            [bezierPoints addObject:[NSValue valueWithCGPoint:points[2]]];
+            break;
+            
+        case kCGPathElementCloseSubpath: // contains no point
+            break;
+    }
 }
 
 #pragma mark - 绘制
@@ -291,6 +468,9 @@ const float kDotSize = 50;   // 点的尺寸
 {
     [parentView addSubview:self];
     
+    pwdSetCount = 0; // 每次都重置
+    tipLabel.text = @"请输入手势";
+    
     [UIView animateWithDuration:0.3 delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
         CGSize screenSize = [UIScreen mainScreen].bounds.size;
         self.frame = CGRectMake(0, 0, screenSize.width, screenSize.height);
@@ -301,6 +481,7 @@ const float kDotSize = 50;   // 点的尺寸
 
 - (void)hide
 {
+    pwdSetCount = 0; // 每次都重置
     [UIView animateWithDuration:0.3 delay:0 options:UIViewAnimationOptionCurveEaseIn animations:^{
         CGSize screenSize = [UIScreen mainScreen].bounds.size;
         self.frame = CGRectMake(0, screenSize.height, screenSize.width, screenSize.height);

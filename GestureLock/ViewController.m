@@ -31,13 +31,23 @@
 - (IBAction)createBtn:(id)sender
 {
     // 显示
+    [GestureLockView sharedLockView].gestureState = CREATE_STATE;
     [[GestureLockView sharedLockView] showInView:self.view];
 }
 
 // 验证手势
 - (IBAction)verifyBtn:(id)sender
 {
-    
+    // 存在密码就校验
+    if ([[NSUserDefaults standardUserDefaults] objectForKey:kPasswordKey])
+    {
+        [GestureLockView sharedLockView].gestureState = VERIFY_STATE;
+        [[GestureLockView sharedLockView] showInView:self.view];
+    }
+    else
+    {
+        NSLog(@"password not created yet");
+    }
 }
 
 // 删除手势

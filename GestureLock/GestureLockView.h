@@ -10,6 +10,12 @@
 
 #define kPasswordKey @"passwordStr"
 
+typedef enum GestureState
+{
+    CREATE_STATE, // 创建状态
+    VERIFY_STATE  // 校验状态
+}GestureState;
+
 typedef void (^PasswordSetBlock)(NSString *);
 
 @interface GestureLockView : UIView
@@ -22,6 +28,7 @@ typedef void (^PasswordSetBlock)(NSString *);
 - (void)hide;
 
 @property (nonatomic, strong) PasswordSetBlock passwordSetBlock; // 设置密码成功回调
+@property (nonatomic, assign) GestureState gestureState;
 
 // 获取密码
 + (NSString *)getGesturePassword;
